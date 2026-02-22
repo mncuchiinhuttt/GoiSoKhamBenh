@@ -18,6 +18,8 @@
 
 	// Cached Vietnamese voice — loaded after voiceschanged fires (async on Chrome)
 	let viVoice: SpeechSynthesisVoice | null = null;
+	// True once a Vietnamese voice is confirmed available — drives the warning banner
+	let voiceReady = $state(false);
 
 	// Pending speech timeout ID — cleared before each new call to prevent
 	// double-queuing when two CALLED messages arrive within the debounce window.
@@ -28,7 +30,9 @@
 		viVoice =
 			voices.find((v) => v.lang === 'vi-VN') ??
 			voices.find((v) => v.lang.startsWith('vi')) ??
+			voices.find((v) => v.name.toLowerCase().includes('vietnamese')) ??
 			null;
+		voiceReady = viVoice !== null;
 	}
 
 	onMount(() => {
@@ -51,6 +55,21 @@
 		audioEnabled = true;
 	}
 
+	// Convert 1–99 to Vietnamese words so TTS reads naturally and slowly.
+	// Reading "hai mươi mốt" is inherently slower + clearer than reading "21".
+	function numberToVietnamese(n: number): string {
+		const units = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
+		if (n <= 9) return units[n];
+		if (n === 10) return 'mười';
+		const tens = Math.floor(n / 10);
+		const unit = n % 10;
+		const tensWord = tens === 1 ? 'mười' : `${units[tens]} mươi`;
+		if (unit === 0) return tensWord;
+		if (unit === 1 && tens > 1) return `${tensWord} mốt`;
+		if (unit === 5 && tens >= 1) return `${tensWord} lăm`;
+		return `${tensWord} ${units[unit]}`;
+	}
+
 	function announce(called: CalledMessage): void {
 		// Cancel any pending debounce timeout — prevents double-queuing when
 		// two calls arrive within the debounce window.
@@ -64,12 +83,16 @@
 		// cancel(). The extra margin also absorbs rapid back-to-back calls.
 		speechTimer = setTimeout(() => {
 			speechTimer = null;
-			const utterance = new SpeechSynthesisUtterance(`Mời số ${called.display}`);
+			const spokenNumber = numberToVietnamese(called.number);
+			// Repeat twice — standard clinic practice; also works around Windows SAPI
+			// ignoring the rate property by making the announcement naturally longer.
+			// The period between repetitions forces a pause on all SAPI voices.
+			const utterance = new SpeechSynthesisUtterance(
+				`Mời, số, ${spokenNumber}. Mời, số, ${spokenNumber}.`
+			);
 			utterance.lang = 'vi-VN';
-			// Explicitly set the voice if we found one — avoids picking the wrong
-			// default voice and getting garbled pronunciation.
 			if (viVoice) utterance.voice = viVoice;
-			utterance.rate = 0.85;
+			utterance.rate = 0.5;
 			utterance.pitch = 1.0;
 			utterance.volume = 1.0;
 			// Chrome bug: after ~15s of silence the synthesizer silently pauses.
@@ -143,6 +166,19 @@
 			{ws.status === 'connected' ? 'Đang kết nối' : 'Đang kết nối lại…'}
 		</span>
 	</div>
+
+	<!-- Warning: no Vietnamese TTS voice found -->
+	{#if audioEnabled && !voiceReady}
+		<div
+			class="mt-3 max-w-sm rounded border border-yellow-600/40 bg-yellow-600/10 px-4 py-2
+				   text-center text-xs text-yellow-400"
+		>
+			Không tìm thấy giọng tiếng Việt.<br />
+			Dùng <strong class="font-semibold text-yellow-300">Microsoft Edge</strong> để phát tiếng Việt,
+			hoặc vào:<br />
+			<em>Settings → Time &amp; Language → Speech → Add voices → Vietnamese (Vietnam)</em>
+		</div>
+	{/if}
 </div>
 
 <style>
