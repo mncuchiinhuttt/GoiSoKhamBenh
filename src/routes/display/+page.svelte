@@ -88,11 +88,11 @@
 			// ignoring the rate property by making the announcement naturally longer.
 			// The period between repetitions forces a pause on all SAPI voices.
 			const utterance = new SpeechSynthesisUtterance(
-				`Mời, số, ${spokenNumber}. Mời, số, ${spokenNumber}.`
+				`Mời số, ${spokenNumber}.`
 			);
 			utterance.lang = 'vi-VN';
 			if (viVoice) utterance.voice = viVoice;
-			utterance.rate = 0.5;
+			utterance.rate = 0.7;
 			utterance.pitch = 1.0;
 			utterance.volume = 1.0;
 			// Chrome bug: after ~15s of silence the synthesizer silently pauses.
