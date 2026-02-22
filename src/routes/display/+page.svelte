@@ -16,10 +16,25 @@
 	// while a number is already on screen.
 	let lastAnnouncedTs: number | null = null;
 
-	// Cached Vietnamese voice — loaded after voiceschanged fires (async on Chrome)
-	let viVoice: SpeechSynthesisVoice | null = null;
-	// True once a Vietnamese voice is confirmed available — drives the warning banner
-	let voiceReady = $state(false);
+	// Google TTS mode indicator
+	let ttsMode = $state<'google' | 'browser' | 'unknown'>('unknown');
+	// Last Google TTS error (for debugging)
+	let ttsError = $state<string | null>(null);
+	// Active Google TTS audio element — cancelled when a new number is called
+	let currentAudio: HTMLAudioElement | null = null;
+
+	// All voices available on this device/browser
+	let allVoices = $state<SpeechSynthesisVoice[]>([]);
+	// URI of the user-selected voice — persisted to localStorage
+	let selectedVoiceURI = $state<string>(
+		browser ? (localStorage.getItem('display-voice-uri') ?? '') : ''
+	);
+	// Resolved voice object from the current selection
+	const activeVoice = $derived(
+		allVoices.find((v) => v.voiceURI === selectedVoiceURI) ?? null
+	);
+	// True when voices are loaded AND a valid voice is selected
+	const voiceReady = $derived(allVoices.length > 0 && activeVoice !== null);
 
 	// Pending speech timeout ID — cleared before each new call to prevent
 	// double-queuing when two CALLED messages arrive within the debounce window.
@@ -27,12 +42,27 @@
 
 	function loadVoices(): void {
 		const voices = speechSynthesis.getVoices();
-		viVoice =
-			voices.find((v) => v.lang === 'vi-VN') ??
-			voices.find((v) => v.lang.startsWith('vi')) ??
-			voices.find((v) => v.name.toLowerCase().includes('vietnamese')) ??
-			null;
-		voiceReady = viVoice !== null;
+		if (voices.length === 0) return; // not ready yet — wait for voiceschanged
+		allVoices = voices;
+
+		// Auto-select the best Vietnamese voice if nothing saved yet,
+		// or if the saved voice no longer exists (e.g. different browser/machine).
+		if (!selectedVoiceURI || !voices.some((v) => v.voiceURI === selectedVoiceURI)) {
+			const best =
+				voices.find((v) => v.lang === 'vi-VN') ??
+				voices.find((v) => v.lang.startsWith('vi')) ??
+				voices.find((v) => v.name.toLowerCase().includes('vietnamese')) ??
+				null;
+			if (best) {
+				selectedVoiceURI = best.voiceURI;
+				localStorage.setItem('display-voice-uri', best.voiceURI);
+			}
+		}
+	}
+
+	function selectVoice(uri: string): void {
+		selectedVoiceURI = uri;
+		localStorage.setItem('display-voice-uri', uri);
 	}
 
 	onMount(() => {
@@ -45,6 +75,10 @@
 		speechSynthesis.removeEventListener('voiceschanged', loadVoices);
 		if (speechTimer !== null) clearTimeout(speechTimer);
 		speechSynthesis.cancel();
+		if (currentAudio) {
+			currentAudio.pause();
+			currentAudio = null;
+		}
 	});
 
 	function enableAudio(): void {
@@ -70,48 +104,91 @@
 		return `${tensWord} ${units[unit]}`;
 	}
 
+	function buildUtterance(text: string): SpeechSynthesisUtterance {
+		const u = new SpeechSynthesisUtterance(text);
+		u.lang = activeVoice?.lang ?? 'vi-VN';
+		if (activeVoice) u.voice = activeVoice;
+		u.rate = 0.85;
+		u.pitch = 1.0;
+		u.volume = 1.0;
+		return u;
+	}
+
 	function announce(called: CalledMessage): void {
-		// Cancel any pending debounce timeout — prevents double-queuing when
-		// two calls arrive within the debounce window.
+		// Cancel any pending debounce
 		if (speechTimer !== null) {
 			clearTimeout(speechTimer);
 			speechTimer = null;
 		}
+		// Cancel any playing Google TTS audio
+		if (currentAudio) {
+			currentAudio.pause();
+			currentAudio = null;
+		}
 		speechSynthesis.cancel();
 
-		// 100ms debounce: Chrome silently no-ops speak() called immediately after
-		// cancel(). The extra margin also absorbs rapid back-to-back calls.
+		// 100ms debounce: Chrome silently no-ops speak() called immediately after cancel().
 		speechTimer = setTimeout(() => {
 			speechTimer = null;
-			const spokenNumber = numberToVietnamese(called.number);
-			// Repeat twice — standard clinic practice; also works around Windows SAPI
-			// ignoring the rate property by making the announcement naturally longer.
-			// The period between repetitions forces a pause on all SAPI voices.
-			const utterance = new SpeechSynthesisUtterance(
-				`Mời số, ${spokenNumber}.`
-			);
-			utterance.lang = 'vi-VN';
-			if (viVoice) utterance.voice = viVoice;
-			utterance.rate = 0.5;
-			utterance.pitch = 1.0;
-			utterance.volume = 1.0;
-			// Chrome bug: after ~15s of silence the synthesizer silently pauses.
-			// cancel() does not unpause — must call resume() before speak().
-			if (speechSynthesis.paused) speechSynthesis.resume();
-			speechSynthesis.speak(utterance);
+			const text = `Mời số, ${numberToVietnamese(called.number)}.`;
+			announceWithGoogleTTS(text).catch((err: unknown) => {
+				ttsError = err instanceof Error ? err.message : String(err);
+				announceWithBrowserTTS(text);
+			});
 		}, 100);
 	}
 
+	async function announceWithGoogleTTS(text: string): Promise<void> {
+		const resp = await fetch('/api/tts', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ text })
+		});
+		if (!resp.ok) {
+			const body = await resp.text().catch(() => '');
+			throw new Error(`HTTP ${resp.status}: ${body}`);
+		}
+		const blob = await resp.blob();
+		const url = URL.createObjectURL(blob);
+		const audio = new Audio(url);
+		currentAudio = audio;
+		audio.onended = () => {
+			URL.revokeObjectURL(url);
+			if (currentAudio === audio) currentAudio = null;
+		};
+		ttsError = null;
+		ttsMode = 'google';
+		await audio.play();
+	}
+
+	function announceWithBrowserTTS(text: string): void {
+		ttsMode = 'browser';
+		if (speechSynthesis.paused) speechSynthesis.resume();
+		speechSynthesis.speak(buildUtterance(text));
+	}
+
+	function testVoice(): void {
+		speechSynthesis.cancel();
+		if (speechSynthesis.paused) speechSynthesis.resume();
+		speechSynthesis.speak(buildUtterance('Mời số, hai mươi mốt.'));
+	}
+
+	// Voices sorted: vi-VN first, then vi-*, then rest alphabetically by lang+name
+	const sortedVoices = $derived(
+		[...allVoices].sort((a, b) => {
+			const aVi = a.lang.startsWith('vi') ? 0 : 1;
+			const bVi = b.lang.startsWith('vi') ? 0 : 1;
+			if (aVi !== bVi) return aVi - bVi;
+			return a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name);
+		})
+	);
+
 	// ─── Reactive: fire speech on new CALLED events ───────────────────────────
-	// Read BOTH dependencies unconditionally before any short-circuit so Svelte
-	// always registers them — otherwise the short-circuit on the first run
-	// (ws.lastCalled is null) prevents audioEnabled from ever being tracked,
-	// and clicking "Bật loa" would not re-run the effect.
 	$effect(() => {
 		const called = ws.lastCalled;
 		const enabled = audioEnabled; // read unconditionally — must be a tracked dep
 		if (!called || !enabled) return;
-		if (lastAnnouncedTs === called.ts) return; // same call, don't replay
+		if (lastAnnouncedTs === called.ts) return;
 		lastAnnouncedTs = called.ts;
 		announce(called);
 	});
@@ -139,8 +216,7 @@
 
 <!-- Main display -->
 <div class="flex h-screen select-none flex-col items-center justify-center bg-gray-950">
-	<!-- Big number — {#key ts} destroys and recreates the element on each new call
-	     (including recalls which have a fresh ts), resetting the CSS animation. -->
+	<!-- Big number -->
 	{#key ws.lastCalled?.ts}
 		<div class="animate-number-flash text-[14rem] font-black leading-none tabular-nums text-white">
 			{displayNumber()}
@@ -167,16 +243,53 @@
 		</span>
 	</div>
 
-	<!-- Warning: no Vietnamese TTS voice found -->
-	{#if audioEnabled && !voiceReady}
-		<div
-			class="mt-3 max-w-sm rounded border border-yellow-600/40 bg-yellow-600/10 px-4 py-2
-				   text-center text-xs text-yellow-400"
-		>
-			Không tìm thấy giọng tiếng Việt.<br />
-			Dùng <strong class="font-semibold text-yellow-300">Microsoft Edge</strong> để phát tiếng Việt,
-			hoặc vào:<br />
-			<em>Settings → Time &amp; Language → Speech → Add voices → Vietnamese (Vietnam)</em>
+	<!-- TTS mode indicator (shown after first announcement) -->
+	{#if audioEnabled && ttsMode !== 'unknown'}
+		<p class="mt-3 text-xs {ttsMode === 'google' ? 'text-green-600' : 'text-yellow-500'}">
+			{ttsMode === 'google' ? '● Google Cloud TTS' : '● Browser TTS (fallback)'}
+		</p>
+	{/if}
+
+	<!-- Google TTS error (debug) -->
+	{#if ttsError}
+		<p class="mt-2 max-w-xs break-all text-center text-xs text-red-400">
+			Google TTS error: {ttsError}
+		</p>
+	{/if}
+
+	<!-- Voice selector — shown in browser fallback mode -->
+	{#if audioEnabled && ttsMode !== 'google' && allVoices.length > 0}
+		<div class="mt-4 flex flex-col items-center gap-2">
+			<p class="text-xs font-medium tracking-widest text-gray-600 uppercase">Giọng đọc</p>
+			<div class="flex items-center gap-2">
+				<select
+					value={selectedVoiceURI}
+					onchange={(e) => selectVoice((e.target as HTMLSelectElement).value)}
+					class="max-w-[260px] rounded border border-gray-700 bg-gray-900 px-3 py-1.5
+						   text-xs text-gray-300 focus:border-gray-500 focus:outline-none"
+				>
+					{#if !selectedVoiceURI}
+						<option value="">— Chọn giọng —</option>
+					{/if}
+					{#each sortedVoices as voice (voice.voiceURI)}
+						<option value={voice.voiceURI}>
+							{voice.name} ({voice.lang})
+						</option>
+					{/each}
+				</select>
+				<button
+					onclick={testVoice}
+					disabled={!activeVoice}
+					class="rounded border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs
+						   text-gray-400 transition-colors hover:border-gray-500 hover:text-gray-200
+						   disabled:cursor-not-allowed disabled:opacity-40"
+				>
+					Thử
+				</button>
+			</div>
+			{#if !voiceReady}
+				<p class="text-xs text-yellow-500">Chưa chọn giọng — chọn một giọng tiếng Việt bên trên</p>
+			{/if}
 		</div>
 	{/if}
 </div>
