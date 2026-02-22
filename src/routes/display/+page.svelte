@@ -92,7 +92,7 @@
 			);
 			utterance.lang = 'vi-VN';
 			if (viVoice) utterance.voice = viVoice;
-			utterance.rate = 0.7;
+			utterance.rate = 0.5;
 			utterance.pitch = 1.0;
 			utterance.volume = 1.0;
 			// Chrome bug: after ~15s of silence the synthesizer silently pauses.
