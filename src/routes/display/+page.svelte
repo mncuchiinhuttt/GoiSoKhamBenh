@@ -116,9 +116,6 @@
 
 <!-- Main display -->
 <div class="flex h-screen select-none flex-col items-center justify-center bg-gray-950">
-	<!-- Room label -->
-	<p class="mb-4 text-sm font-medium tracking-widest text-gray-500 uppercase">Phòng P1</p>
-
 	<!-- Big number — {#key ts} destroys and recreates the element on each new call
 	     (including recalls which have a fresh ts), resetting the CSS animation. -->
 	{#key ws.lastCalled?.ts}

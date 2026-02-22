@@ -80,7 +80,7 @@
 	<!-- Header -->
 	<header class="sticky top-0 z-10 border-b border-gray-200 bg-white">
 		<div class="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
-			<h1 class="text-sm font-semibold text-gray-900">Gọi số – Phòng P1</h1>
+			<h1 class="text-sm font-semibold text-gray-900">Gọi số</h1>
 			<div class="flex items-center gap-2">
 				<span
 					class="inline-block h-2 w-2 rounded-full"
