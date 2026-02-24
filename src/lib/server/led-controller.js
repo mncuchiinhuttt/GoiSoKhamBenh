@@ -1,43 +1,54 @@
 // LED RS485 Display Controller
-// Frame: [0x02] [0xFF] [address] [4 ASCII digits order] [2 ASCII digits counter] [0x03]
-// LED cần nhận frame liên tục mỗi 2s để giữ hiển thị, nếu không tự reset về "HELLO".
+// Protocol discovered from Java app serial capture:
+//   - Background polling mỗi 500ms (giữ counter device sống)
+//   - Khi gọi số: prepare → LED frame → prepare (3-step sequence)
+//
+// Polling frames:
+//   02 DD 01 45 03 03  → poll counter addr 1
+//   02 DD 0F 45 03 03  → poll counter addr 15
+//   02 CC 00 45 03 03  → poll device CC addr 0
+//
+// LED frame:
+//   02 FF 00 [4 ASCII digits order] [2 ASCII digits counter] 03
 
 import { SerialPort } from 'serialport';
 
 const COM_PORT = process.env.LED_COM_PORT ?? 'COM8';
 const BAUD_RATE = 9600;
-const REFRESH_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 500;
 
 /** @type {SerialPort | null} */
 let port = null;
 
-// Số đang hiển thị trên LED — refresh interval gửi lại liên tục
-let currentDisplay = { number: 0, counter: 1, address: 0 };
-
 /** @type {ReturnType<typeof setInterval> | null} */
-let refreshInterval = null;
+let pollingInterval = null;
 
-/** Tạo frame binary từ params. */
-function buildFrame(number, counter, address) {
-	const orderStr = String(number).padStart(4, '0');
-	const counterStr = String(counter).padStart(2, '0');
-	return Buffer.concat([
-		Buffer.from([0x02, 0xff, address & 0xff]),
-		Buffer.from(orderStr, 'ascii'),
-		Buffer.from(counterStr, 'ascii'),
-		Buffer.from([0x03])
-	]);
+// Polling frames (sent every 500ms like Java app)
+const POLL_FRAMES = [
+	Buffer.from([0x02, 0xdd, 0x01, 0x45, 0x03, 0x03]), // poll counter addr 1
+	Buffer.from([0x02, 0xdd, 0x0f, 0x45, 0x03, 0x03]), // poll counter addr 15
+	Buffer.from([0x02, 0xcc, 0x00, 0x45, 0x03, 0x03])  // poll device CC addr 0
+];
+
+// "Prepare" frame — sent before AND after the LED display frame
+const PREPARE_FRAME = Buffer.from([0x02, 0xdd, 0x00, 0x53, 0x30, 0x39, 0x34, 0x03]);
+
+function sleep(ms) {
+	return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Gửi frame ra port (không async, fire-and-forget dùng cho refresh). */
-function writeFrame(frame) {
+/** Gửi frame ra port rồi đợi drain xong. */
+async function writeFrame(frame) {
 	if (!port?.isOpen) return;
-	port.write(frame, (err) => {
-		if (err) console.error('❌ LED write error:', err.message);
-	});
+	await new Promise((resolve, reject) =>
+		port.write(frame, (err) => (err ? reject(err) : resolve()))
+	);
+	await new Promise((resolve, reject) =>
+		port.drain((err) => (err ? reject(err) : resolve()))
+	);
 }
 
-/** Mở serial port, start refresh interval, đăng ký cleanup khi tắt server. */
+/** Mở serial port, start background polling, đăng ký cleanup khi tắt server. */
 export function initLED() {
 	port = new SerialPort({ path: COM_PORT, baudRate: BAUD_RATE, autoOpen: false });
 
@@ -50,21 +61,23 @@ export function initLED() {
 		}
 		console.log(`📺 LED: Kết nối ${COM_PORT} @ ${BAUD_RATE} baud OK`);
 
-		// Gửi lại frame hiện tại mỗi 2 giây để LED không reset về "HELLO"
-		refreshInterval = setInterval(() => {
-			const frame = buildFrame(
-				currentDisplay.number,
-				currentDisplay.counter,
-				currentDisplay.address
-			);
-			writeFrame(frame);
-		}, REFRESH_INTERVAL_MS);
+		// Background polling mỗi 500ms — giống Java app
+		pollingInterval = setInterval(async () => {
+			try {
+				for (const frame of POLL_FRAMES) {
+					await writeFrame(frame);
+					await sleep(10);
+				}
+			} catch {
+				// Bỏ qua lỗi polling — không crash server
+			}
+		}, POLL_INTERVAL_MS);
 	});
 
 	port.on('close', () => {
-		if (refreshInterval) {
-			clearInterval(refreshInterval);
-			refreshInterval = null;
+		if (pollingInterval) {
+			clearInterval(pollingInterval);
+			pollingInterval = null;
 		}
 	});
 
@@ -74,19 +87,19 @@ export function initLED() {
 
 	// Cleanup khi server shutdown
 	process.on('SIGINT', () => {
-		if (refreshInterval) clearInterval(refreshInterval);
+		if (pollingInterval) clearInterval(pollingInterval);
 		if (port?.isOpen) port.close(() => process.exit());
 		else process.exit();
 	});
 }
 
 /**
- * Gửi số mới ra màn hình LED và cập nhật refresh state.
+ * Gửi số mới ra màn hình LED theo đúng 3-step sequence của Java app.
  *
  * @param {{ number: number, counter?: number, address?: number }} opts
  *   number:  1–99  — số thứ tự bệnh nhân (pad thành 4 digits)
  *   counter: 1–99  — số quầy, mặc định 1
- *   address: 0–15  — địa chỉ màn hình, mặc định 0 (confirmed từ serial capture)
+ *   address: 0–15  — địa chỉ màn hình, mặc định 0
  */
 export async function sendToLED({ number, counter = 1, address = 0 }) {
 	if (!port?.isOpen) {
@@ -94,35 +107,30 @@ export async function sendToLED({ number, counter = 1, address = 0 }) {
 		return;
 	}
 
-	// Cập nhật state để refresh interval tiếp tục gửi số mới
-	currentDisplay = { number, counter, address };
-
-	const frame = buildFrame(number, counter, address);
 	const orderStr = String(number).padStart(4, '0');
 	const counterStr = String(counter).padStart(2, '0');
 
+	const ledFrame = Buffer.concat([
+		Buffer.from([0x02, 0xff, address & 0xff]),
+		Buffer.from(orderStr, 'ascii'),
+		Buffer.from(counterStr, 'ascii'),
+		Buffer.from([0x03])
+	]);
+
 	try {
-		// Timing RS485 half-duplex
-		await new Promise((resolve, reject) =>
-			port.set({ rts: true }, (err) => (err ? reject(err) : resolve()))
-		);
-		await new Promise((r) => setTimeout(r, 1));
+		// Bước 1: Prepare (đánh thức counter device)
+		await writeFrame(PREPARE_FRAME);
+		await sleep(10);
 
-		await new Promise((resolve, reject) =>
-			port.write(frame, (err) => (err ? reject(err) : resolve()))
-		);
+		// Bước 2: Gửi LED display frame
+		await writeFrame(ledFrame);
+		await sleep(10);
 
-		await new Promise((resolve, reject) =>
-			port.drain((err) => (err ? reject(err) : resolve()))
-		);
-
-		await new Promise((resolve, reject) =>
-			port.set({ rts: false }, (err) => (err ? reject(err) : resolve()))
-		);
+		// Bước 3: Prepare lại (confirm)
+		await writeFrame(PREPARE_FRAME);
 
 		console.log(`📺 LED: Hiển thị số ${orderStr} quầy ${counterStr} → addr ${address}`);
 	} catch (err) {
 		console.error('❌ LED sendToLED error:', err.message);
-		port.set({ rts: false }).catch(() => {});
 	}
 }
