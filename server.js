@@ -6,6 +6,7 @@ import { createServer } from 'http';
 import { networkInterfaces } from 'os';
 import { WebSocketServer, WebSocket } from 'ws';
 import { handler } from './build/handler.js';
+import { initLED, sendToLED } from './src/lib/server/led-controller.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0'; // 0.0.0.0 makes it reachable over LAN
@@ -171,6 +172,7 @@ wss.on('connection', (ws) => {
 				if (roomState.history.length > 30) roomState.history.pop();
 
 				broadcast(calledMsg);
+				sendToLED({ number, counter: 1, address: 1 }); // fire-and-forget
 				break;
 			}
 
@@ -192,6 +194,7 @@ wss.on('connection', (ws) => {
 					display: String(roomState.current).padStart(2, '0'),
 					ts: Date.now()
 				});
+				sendToLED({ number: roomState.current, counter: 1, address: 1 }); // fire-and-forget
 				break;
 			}
 
@@ -249,4 +252,5 @@ server.listen(PORT, HOST, () => {
 		console.log(`  LAN:     http://${lanIP}:${PORT}`);
 	}
 	console.log();
+	initLED();
 });

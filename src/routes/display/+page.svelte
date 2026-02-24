@@ -265,7 +265,7 @@
 				<select
 					value={selectedVoiceURI}
 					onchange={(e) => selectVoice((e.target as HTMLSelectElement).value)}
-					class="max-w-[260px] rounded border border-gray-700 bg-gray-900 px-3 py-1.5
+					class="max-w-65 rounded border border-gray-700 bg-gray-900 px-3 py-1.5
 						   text-xs text-gray-300 focus:border-gray-500 focus:outline-none"
 				>
 					{#if !selectedVoiceURI}
