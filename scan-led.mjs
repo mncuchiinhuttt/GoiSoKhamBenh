@@ -86,11 +86,11 @@ async function callNumber({ mainAddr, counterAddr, order, sign }) {
   const mainAddr = 0x00;     // từ monitoring Java trước đây bạn thấy 00 [file:138]
   const counterAddr = 0x01;  // nếu không chắc, thử 0..15
 
-  console.log("Gọi số 0007 quầy 01");
-  await callNumber({ mainAddr, counterAddr, order: 7, sign: 1 });
-
-  console.log("Giữ polling thêm 10s để LED kịp update...");
-  await sleep(10000);
+  for (let ca = 0; ca <= 15; ca++) {
+    console.log("Try counterAddr =", ca);
+    await callNumber({ mainAddr: 0, counterAddr: ca, order: 7, sign: 1 });
+    await sleep(1500);
+  }
 
   polling = false;
   port.close();
