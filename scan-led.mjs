@@ -10,15 +10,23 @@ const port = new SerialPort({
   autoOpen: false,
 });
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-function asciiDigits(num, len) {
-  return Buffer.from(String(num).padStart(len, "0"), "ascii");
+function asciiDigits(n, len) {
+  return Buffer.from(String(n).padStart(len, "0"), "ascii");
 }
 
+// MainDisplay (FF)
 function frameFF(mainAddr, order4, sign2) {
   return Buffer.from([0x02, 0xFF, mainAddr & 0xff, ...order4, ...sign2, 0x03]);
 }
+
+// Polling frames seen in monitoring Java: 02 DD 01 45 03 03 etc. [file:137]
+const pollDD01 = Buffer.from([0x02, 0xDD, 0x01, 0x45, 0x03, 0x03]);
+const pollDD0F = Buffer.from([0x02, 0xDD, 0x0F, 0x45, 0x03, 0x03]);
+const pollCC00 = Buffer.from([0x02, 0xCC, 0x00, 0x45, 0x03, 0x03]);
+
+// Counter frames: DD + digits, EE + digits
 function frameDD(counterAddr, order4) {
   return Buffer.from([0x02, 0xDD, counterAddr & 0xff, ...order4, 0x03]);
 }
@@ -27,42 +35,63 @@ function frameEE(counterAddr, order4) {
 }
 
 async function open() {
-  await new Promise((res, rej) => port.open((e) => (e ? rej(e) : res())));
-  // giữ RTS=true giống Java
-  await new Promise((res, rej) => port.set({ rts: true, dtr: false }, (e) => (e ? rej(e) : res())));
+  await new Promise((res, rej) => port.open(e => e ? rej(e) : res()));
+  // giống Java: RTS=true và giữ nguyên [conversation_history:1]
+  await new Promise((res, rej) => port.set({ rts: true, dtr: false }, e => e ? rej(e) : res()));
   await sleep(10);
 }
 
-async function writeBytesLikeJava(buf) {
-  // Java write từng byte + flush; bên Node dùng write + drain để đảm bảo phát ra hết [web:214]
-  await new Promise((res, rej) => port.write(buf, (e) => (e ? rej(e) : res())));
-  await new Promise((res, rej) => port.drain((e) => (e ? rej(e) : res())));
+// Java writeByte loop + flush; Node nên dùng write + drain để đảm bảo transmit xong [page:0]
+async function writeAndDrain(buf) {
+  await new Promise((res, rej) => port.write(buf, e => e ? rej(e) : res()));
+  await new Promise((res, rej) => port.drain(e => e ? rej(e) : res()));
 }
 
-async function sendSequence({ mainAddr, counterAddr, order, sign }) {
-  const order4 = asciiDigits(order, 4);
-  const sign2 = asciiDigits(sign, 2);
+let polling = true;
 
-  // Nhịp giống thread Java (có các sleep lớn) [conversation_history:1]
-  await writeBytesLikeJava(frameFF(mainAddr, order4, sign2));
-  await sleep(1000);
-  await writeBytesLikeJava(frameDD(counterAddr, order4));
-  await writeBytesLikeJava(frameEE(counterAddr, order4));
-  await sleep(4000);
+async function startPolling() {
+  // Polling mỗi ~500ms như log Java (thấy dày đặc) [file:137]
+  (async () => {
+    while (polling) {
+      try {
+        await writeAndDrain(pollDD01);
+        await sleep(10);
+        await writeAndDrain(pollDD0F);
+        await sleep(10);
+        await writeAndDrain(pollCC00);
+      } catch {}
+      await sleep(450);
+    }
+  })();
+}
+
+async function callNumber({ mainAddr, counterAddr, order, sign }) {
+  const order4 = asciiDigits(order, 4);
+  const sign2  = asciiDigits(sign, 2);
+
+  await writeAndDrain(frameFF(mainAddr, order4, sign2));
+  await sleep(1000);               // giống SendDataToDevice.run [conversation_history:1]
+  await writeAndDrain(frameDD(counterAddr, order4));
+  await writeAndDrain(frameEE(counterAddr, order4));
 }
 
 (async () => {
   await open();
+  await startPolling();
 
-  // Bạn sửa 2 giá trị này theo hệ thống của bạn:
-  const mainAddr = 0x00;     // nhìn trong monitoring Java: byte thứ 3 của frame FF [conversation_history:1]
-  const counterAddr = 0x01;  // thường quầy 01 là address 0x01 (nếu không đúng sẽ brute-force ở phần dưới)
+  console.log("Polling đã chạy. Đợi 2s rồi gọi số...");
+  await sleep(2000);
 
-  console.log("Gửi số 0007, quầy 01...");
-  for (let i = 0; i < 3; i++) {
-    await sendSequence({ mainAddr, counterAddr, order: 7, sign: 1 });
-    console.log(`Done ${i + 1}/3`);
-  }
+  // Bạn chỉnh đúng theo hệ thống của bạn
+  const mainAddr = 0x00;     // từ monitoring Java trước đây bạn thấy 00 [file:138]
+  const counterAddr = 0x01;  // nếu không chắc, thử 0..15
 
+  console.log("Gọi số 0007 quầy 01");
+  await callNumber({ mainAddr, counterAddr, order: 7, sign: 1 });
+
+  console.log("Giữ polling thêm 10s để LED kịp update...");
+  await sleep(10000);
+
+  polling = false;
   port.close();
 })();
