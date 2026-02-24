@@ -47,9 +47,9 @@ export function initLED() {
  * @param {{ number: number, counter?: number, address?: number }} opts
  *   number:  1–99  — số thứ tự bệnh nhân (pad thành 4 digits, ví dụ 23 → "0023")
  *   counter: 1–99  — số quầy (pad thành 2 digits, ví dụ 1 → "01"), mặc định 1
- *   address: 1–15  — địa chỉ màn hình LED, mặc định 1
+ *   address: 0–15  — địa chỉ màn hình LED, mặc định 0 (confirmed từ serial capture)
  */
-export async function sendToLED({ number, counter = 1, address = 1 }) {
+export async function sendToLED({ number, counter = 1, address = 0 }) {
 	if (!port?.isOpen) {
 		console.warn('⚠️ LED: Port chưa mở — bỏ qua lần gửi này');
 		return;

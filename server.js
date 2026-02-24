@@ -172,7 +172,7 @@ wss.on('connection', (ws) => {
 				if (roomState.history.length > 30) roomState.history.pop();
 
 				broadcast(calledMsg);
-				sendToLED({ number, counter: 1, address: 1 }); // fire-and-forget
+				sendToLED({ number, counter: 1, address: 0 }); // fire-and-forget
 				break;
 			}
 
@@ -194,7 +194,7 @@ wss.on('connection', (ws) => {
 					display: String(roomState.current).padStart(2, '0'),
 					ts: Date.now()
 				});
-				sendToLED({ number: roomState.current, counter: 1, address: 1 }); // fire-and-forget
+				sendToLED({ number: roomState.current, counter: 1, address: 0 }); // fire-and-forget
 				break;
 			}
 
