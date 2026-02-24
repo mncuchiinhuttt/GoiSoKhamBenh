@@ -55,20 +55,20 @@ const ctrBytes = [...Buffer.from(CTR, 'ascii')]; // [0x30,0x31]
 
 const FRAMES = [
 	{
-		label: 'Full protocol (0xFF device, addr=1, 4+2 digits)',
-		buf: Buffer.from([0x02, 0xff, 0x01, ...numBytes, ...ctrBytes, 0x03])
+		label: 'Full protocol — addr=0 (CONFIRMED từ serial capture) ✅',
+		buf: Buffer.from([0x02, 0xff, 0x00, ...numBytes, ...ctrBytes, 0x03])
 	},
 	{
-		label: 'No counter (0xFF device, addr=1, 4 digits only)',
-		buf: Buffer.from([0x02, 0xff, 0x01, ...numBytes, 0x03])
+		label: 'No counter (0xFF device, addr=0, 4 digits only)',
+		buf: Buffer.from([0x02, 0xff, 0x00, ...numBytes, 0x03])
 	},
 	{
-		label: 'No device code (addr=1, 4+2 digits)',
-		buf: Buffer.from([0x02, 0x01, ...numBytes, ...ctrBytes, 0x03])
+		label: 'No device code (addr=0, 4+2 digits)',
+		buf: Buffer.from([0x02, 0x00, ...numBytes, ...ctrBytes, 0x03])
 	},
 	{
-		label: 'No device code, no counter (addr=1, 4 digits)',
-		buf: Buffer.from([0x02, 0x01, ...numBytes, 0x03])
+		label: 'No device code, no counter (addr=0, 4 digits)',
+		buf: Buffer.from([0x02, 0x00, ...numBytes, 0x03])
 	},
 	{
 		label: 'Just digits in STX/ETX (no addr, 4 digits)',
@@ -79,21 +79,21 @@ const FRAMES = [
 		buf: Buffer.from(NUM + '\r\n', 'ascii')
 	},
 	{
-		label: 'Device code 0xDD (addr=1, 4+2 digits)',
-		buf: Buffer.from([0x02, 0xdd, 0x01, ...numBytes, ...ctrBytes, 0x03])
+		label: 'Device code 0xDD (addr=0, 4+2 digits)',
+		buf: Buffer.from([0x02, 0xdd, 0x00, ...numBytes, ...ctrBytes, 0x03])
 	},
 	{
-		label: 'Device code 0xAA (addr=1, 4+2 digits)',
-		buf: Buffer.from([0x02, 0xaa, 0x01, ...numBytes, ...ctrBytes, 0x03])
+		label: 'Device code 0xAA (addr=0, 4+2 digits)',
+		buf: Buffer.from([0x02, 0xaa, 0x00, ...numBytes, ...ctrBytes, 0x03])
 	},
 	{
-		label: 'Addr=1 (full, RTS delay=10ms thay vì 1ms)',
-		buf: Buffer.from([0x02, 0xff, 0x01, ...numBytes, ...ctrBytes, 0x03]),
+		label: 'Addr=0 (full, RTS delay=10ms thay vì 1ms)',
+		buf: Buffer.from([0x02, 0xff, 0x00, ...numBytes, ...ctrBytes, 0x03]),
 		rtsDelay: 10
 	},
 	{
-		label: 'Addr=1 (full, không dùng RTS)',
-		buf: Buffer.from([0x02, 0xff, 0x01, ...numBytes, ...ctrBytes, 0x03]),
+		label: 'Addr=0 (full, không dùng RTS)',
+		buf: Buffer.from([0x02, 0xff, 0x00, ...numBytes, ...ctrBytes, 0x03]),
 		skipRts: true
 	}
 ];
