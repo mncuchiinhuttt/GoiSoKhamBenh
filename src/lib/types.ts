@@ -51,6 +51,7 @@ export interface CalledMessage {
 	number: number;
 	display: string; // zero-padded: "01"–"99"
 	ts: number; // epoch ms
+	skipped?: boolean; // true when this entry was created by a SKIP (no TTS)
 }
 
 export interface ErrorMessage {
@@ -67,13 +68,34 @@ export interface ResettedMessage {
 	type: 'RESETTED';
 }
 
+export interface SkipMessage {
+	type: 'SKIP';
+	queueId: string;
+	room: string;
+	number: number;
+}
+
+export interface SkippedMessage {
+	type: 'SKIPPED';
+	queueId: string;
+	room: string;
+	number: number;
+	ts: number; // epoch ms
+}
+
 // ─── Union types ──────────────────────────────────────────────────────────────
 
-export type ClientToServerMessage = HelloMessage | CallMessage | RecallLastMessage | ResetMessage;
+export type ClientToServerMessage =
+	| HelloMessage
+	| CallMessage
+	| RecallLastMessage
+	| ResetMessage
+	| SkipMessage;
 export type ServerToClientMessage =
 	| StateSyncMessage
 	| CalledMessage
 	| ErrorMessage
 	| DisplaysChangedMessage
-	| ResettedMessage;
+	| ResettedMessage
+	| SkippedMessage;
 export type AnyMessage = ClientToServerMessage | ServerToClientMessage;

@@ -89,6 +89,17 @@
 		audioEnabled = true;
 	}
 
+	// Connect to Google TTS immediately when "Bật loa" is clicked.
+	// This pre-warms the connection, populates the cache, and confirms the speaker works
+	// before the first number is called — so there's no delay on first announcement.
+	$effect(() => {
+		if (!audioEnabled) return;
+		announceWithGoogleTTS('Loa đã sẵn sàng').catch((err: unknown) => {
+			ttsError = err instanceof Error ? err.message : String(err);
+			announceWithBrowserTTS('Loa đã sẵn sàng');
+		});
+	});
+
 	// Convert 1–99 to Vietnamese words so TTS reads naturally and slowly.
 	// Reading "hai mươi mốt" is inherently slower + clearer than reading "21".
 	function numberToVietnamese(n: number): string {

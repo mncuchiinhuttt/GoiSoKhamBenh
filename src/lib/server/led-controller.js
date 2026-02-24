@@ -1,17 +1,3 @@
-// LED RS485 Display Controller
-// Protocol confirmed from scan-led.mjs (working):
-//
-// Init: setRTS(true), setDTR(false) once on open — never change afterwards
-//
-// Background polling (~500ms cycle, async while loop):
-//   DD01 → sleep 10ms → DD0F → sleep 10ms → CC00 → sleep 450ms → repeat
-//
-// callNumber sequence:
-//   1. FF frame:  02 FF [addr] [4 ASCII digits order] [2 ASCII digits sign] 03
-//   2. sleep 1000ms
-//   3. DD frame:  02 DD [addr] [4 ASCII digits order] 03
-//   4. EE frame:  02 EE [addr] [4 ASCII digits order] 03
-
 import { SerialPort } from 'serialport';
 
 const COM_PORT = process.env.LED_COM_PORT ?? 'COM8';
@@ -22,6 +8,15 @@ let port = null;
 
 /** @type {boolean} */
 let polling = false;
+
+/** Controls the idle scroll loop. Incremented on each new sendIdleToLED() call
+ *  so any previous loop exits when it sees its generation no longer matches. */
+let idleScrolling = false;
+let idleGeneration = 0;
+
+/** "XIN CHAO" scrolled across the 6-position LED (4+2 FF frame).
+ *  11 chars = 8 text + 3 trailing spaces for clean wrap-around. */
+const IDLE_TEXT = 'XIN CHAO   ';
 
 // Polling frames (sent every ~500ms like scan-led.mjs)
 const pollDD01 = Buffer.from([0x02, 0xdd, 0x01, 0x45, 0x03, 0x03]);
@@ -81,6 +76,38 @@ async function startPolling() {
 	})();
 }
 
+/**
+ * Scroll "XIN CHAO" across the LED when no number is being called.
+ * Sends an FF frame every 500ms, sliding a 6-char window over IDLE_TEXT.
+ * Stops automatically when sendToLED() is called.
+ *
+ * @param {{ address?: number }} [opts]
+ */
+export function sendIdleToLED({ address = 0 } = {}) {
+	idleScrolling = true;
+	const generation = ++idleGeneration;
+	const doubled = IDLE_TEXT + IDLE_TEXT; // pre-compute for wrapping
+	let i = 0;
+	(async () => {
+		while (idleScrolling && idleGeneration === generation) {
+			if (!port?.isOpen) {
+				await sleep(500);
+				continue;
+			}
+			const chunk = doubled.substring(i, i + 6);
+			const order4 = Buffer.from(chunk.substring(0, 4), 'ascii');
+			const sign2 = Buffer.from(chunk.substring(4, 6), 'ascii');
+			try {
+				await writeAndDrain(frameFF(address, order4, sign2));
+			} catch {
+				// ignore — port may be busy
+			}
+			await sleep(500);
+			i = (i + 1) % IDLE_TEXT.length;
+		}
+	})();
+}
+
 /** Open serial port, set RTS/DTR once, start background polling. */
 export function initLED() {
 	port = new SerialPort({
@@ -112,6 +139,7 @@ export function initLED() {
 		setTimeout(() => {
 			console.log(`📺 LED: Kết nối ${COM_PORT} @ ${BAUD_RATE} baud OK`);
 			startPolling();
+			sendIdleToLED(); // show "XIN CHAO" scroll while waiting for first call
 		}, 10);
 	});
 
@@ -140,6 +168,9 @@ export function initLED() {
  *   address: 0–15  — display address, default 0
  */
 export async function sendToLED({ number, counter = 1, address = 0 }) {
+	// Stop idle scroll before sending the number
+	idleScrolling = false;
+
 	if (!port?.isOpen) {
 		console.warn('⚠️ LED: Port chưa mở — bỏ qua lần gửi này');
 		return;

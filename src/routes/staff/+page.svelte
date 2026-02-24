@@ -34,6 +34,12 @@
 		if (nextNumber !== null) callNumber(nextNumber);
 	}
 
+	function skipNext(): void {
+		if (nextNumber !== null) {
+			ws.send({ type: 'SKIP', queueId: 'general', room: 'P1', number: nextNumber });
+		}
+	}
+
 	function callManual(): void {
 		manualError = '';
 		const n = parseInt(manualInput.trim(), 10);
@@ -167,6 +173,17 @@
 			{/if}
 		</button>
 
+		<!-- Skip next number -->
+		<button
+			onclick={skipNext}
+			disabled={ws.status !== 'connected' || nextNumber === null}
+			class="w-full rounded-md border border-gray-200 bg-white py-2.5 text-sm font-semibold
+				   text-gray-500 transition-colors hover:border-gray-300 hover:bg-gray-50
+				   disabled:cursor-not-allowed disabled:opacity-40"
+		>
+			Bỏ qua số {nextNumber !== null ? String(nextNumber).padStart(2, '0') : '—'}
+		</button>
+
 		<!-- Manual input -->
 		<div class="rounded-lg border border-gray-200 bg-white p-4">
 			<p class="mb-3 text-xs font-medium tracking-widest text-gray-400 uppercase">Gọi số cụ thể</p>
@@ -249,33 +266,44 @@
 			{:else}
 				<ul class="divide-y divide-gray-50">
 					{#each ws.history as item, i (item.ts)}
-						<li class="flex items-center gap-3 px-4 py-3">
+						<li
+							class="flex items-center gap-3 px-4 py-3"
+							class:opacity-50={item.skipped}
+						>
 							<!-- Index -->
 							<span class="w-5 text-right text-xs text-gray-300">{i + 1}</span>
 
-							<!-- Number — highlight the most recently displayed one -->
+							<!-- Number — highlight the most recently displayed one, strikethrough if skipped -->
 							<span
 								class="text-2xl font-black tabular-nums"
 								class:text-gray-900={item.ts === ws.lastCalled?.ts}
 								class:text-gray-400={item.ts !== ws.lastCalled?.ts}
+								class:line-through={item.skipped}
 							>
 								{item.display}
 							</span>
 
-							<!-- Timestamp -->
-							<span class="flex-1 text-xs text-gray-400">{formatTime(item.ts)}</span>
+							<!-- Timestamp + skipped label -->
+							<span class="flex-1 text-xs text-gray-400">
+								{formatTime(item.ts)}
+								{#if item.skipped}
+									<span class="ml-1 text-orange-400">đã bỏ</span>
+								{/if}
+							</span>
 
-							<!-- Recall -->
-							<button
-								onclick={() => recallHistoryItem(item)}
-								disabled={ws.status !== 'connected'}
-								class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs
-									   font-semibold text-gray-600 transition-colors
-									   hover:border-gray-300 hover:bg-gray-50
-									   disabled:cursor-not-allowed disabled:opacity-40"
-							>
-								Gọi lại
-							</button>
+							<!-- Recall (hidden for skipped items) -->
+							{#if !item.skipped}
+								<button
+									onclick={() => recallHistoryItem(item)}
+									disabled={ws.status !== 'connected'}
+									class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs
+										   font-semibold text-gray-600 transition-colors
+										   hover:border-gray-300 hover:bg-gray-50
+										   disabled:cursor-not-allowed disabled:opacity-40"
+								>
+									Gọi lại
+								</button>
+							{/if}
 						</li>
 					{/each}
 				</ul>

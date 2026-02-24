@@ -6,7 +6,7 @@ import { createServer } from 'http';
 import { networkInterfaces } from 'os';
 import { WebSocketServer, WebSocket } from 'ws';
 import { handler } from './build/handler.js';
-import { initLED, sendToLED } from './src/lib/server/led-controller.js';
+import { initLED, sendToLED, sendIdleToLED } from './src/lib/server/led-controller.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0'; // 0.0.0.0 makes it reachable over LAN
@@ -208,6 +208,28 @@ wss.on('connection', (ws) => {
 				}
 				// Broadcast to all clients (staff + display) so every screen resets
 				broadcast({ type: 'RESETTED' });
+				sendIdleToLED({ address: 0 }); // resume idle scroll after reset
+				break;
+			}
+
+			case 'SKIP': {
+				const { queueId, room, number } = msg;
+				if (!Number.isInteger(number) || number < 1 || number > 99) break;
+				const roomState = state.queues[queueId]?.rooms[room];
+				if (!roomState) break;
+				roomState.calledNumbers.add(number);
+				const skippedTs = Date.now();
+				roomState.history.unshift({
+					type: 'CALLED',
+					queueId,
+					room,
+					number,
+					display: String(number).padStart(2, '0'),
+					ts: skippedTs,
+					skipped: true
+				});
+				if (roomState.history.length > 30) roomState.history.pop();
+				broadcast({ type: 'SKIPPED', queueId, room, number, ts: skippedTs });
 				break;
 			}
 

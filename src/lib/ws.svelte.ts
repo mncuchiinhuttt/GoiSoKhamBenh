@@ -9,6 +9,7 @@ import type {
 	DisplayInfo,
 	DisplaysChangedMessage,
 	ResettedMessage,
+	SkippedMessage,
 	StateSyncMessage
 } from './types.js';
 
@@ -146,6 +147,22 @@ export class WsClient {
 				this.lastCalled = null;
 				this.history = [];
 				this.calledNumbers = new Set();
+				break;
+			}
+			case 'SKIPPED': {
+				const skipped = msg as SkippedMessage;
+				this.calledNumbers = new Set([...this.calledNumbers, skipped.number]);
+				const historyEntry: CalledMessage = {
+					type: 'CALLED',
+					queueId: skipped.queueId,
+					room: skipped.room,
+					number: skipped.number,
+					display: String(skipped.number).padStart(2, '0'),
+					ts: skipped.ts,
+					skipped: true
+				};
+				this.history = [historyEntry, ...this.history].slice(0, 30);
+				// Do NOT set lastCalled — skipped numbers must not trigger TTS
 				break;
 			}
 			case 'ERROR': {
