@@ -15,7 +15,7 @@ export interface CallMessage {
 	type: 'CALL';
 	queueId: string;
 	room: string;
-	number: number; // integer 1–99
+	number: number; // integer 1–50
 }
 
 export interface RecallLastMessage {
@@ -49,7 +49,7 @@ export interface CalledMessage {
 	queueId: string;
 	room: string;
 	number: number;
-	display: string; // zero-padded: "01"–"99"
+	display: string; // zero-padded: "01"–"50"
 	ts: number; // epoch ms
 	skipped?: boolean; // true when this entry was created by a SKIP (no TTS)
 }

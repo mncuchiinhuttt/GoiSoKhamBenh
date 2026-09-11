@@ -16,12 +16,13 @@
 	// while a number is already on screen.
 	let lastAnnouncedTs: number | null = null;
 
-	// Kokoro TTS mode indicator
-	let ttsMode = $state<'kokoro' | 'browser' | 'unknown'>('unknown');
-	// Last Kokoro TTS error (for debugging)
+	// Native macOS TTS audio-file mode
+	let ttsMode = $state<'macos' | 'browser' | 'unknown'>('unknown');
+	// Last local audio error (for debugging)
 	let ttsError = $state<string | null>(null);
-	// Active Kokoro TTS audio element — cancelled when a new number is called
+	// Active local audio element — cancelled when a new number is called
 	let currentAudio: HTMLAudioElement | null = null;
+	let currentSource: AudioBufferSourceNode | null = null;
 
 	// All voices available on this device/browser
 	let allVoices = $state<SpeechSynthesisVoice[]>([]);
@@ -103,7 +104,10 @@
 			prewarmedAudio = new Audio();
 			prewarmedAudio.src =
 				'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-			prewarmedAudio.play().then(() => prewarmedAudio?.pause()).catch(() => {});
+			prewarmedAudio
+				.play()
+				.then(() => prewarmedAudio?.pause())
+				.catch(() => {});
 		} catch (e) {
 			console.warn('[Audio] Failed to pre-warm HTML5 Audio:', e);
 		}
@@ -116,20 +120,10 @@
 		} catch {}
 
 		audioEnabled = true;
+		announceWithBrowserTTS('Loa đã sẵn sàng');
 	}
 
-	// Connect to Kokoro TTS immediately when "Bật loa" is clicked.
-	// This pre-warms the connection, populates the cache, and confirms the speaker works
-	// before the first number is called — so there's no delay on first announcement.
-	$effect(() => {
-		if (!audioEnabled) return;
-		announceWithKokoroTTS('Loa đã sẵn sàng').catch((err: unknown) => {
-			ttsError = err instanceof Error ? err.message : String(err);
-			announceWithBrowserTTS('Loa đã sẵn sàng');
-		});
-	});
-
-	// Convert 1–99 to Vietnamese words so TTS reads naturally and slowly.
+	// Convert 1–50 to Vietnamese words so TTS reads naturally and slowly.
 	// Reading "hai mươi mốt" is inherently slower + clearer than reading "21".
 	function numberToVietnamese(n: number): string {
 		const units = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
@@ -160,7 +154,14 @@
 			clearTimeout(speechTimer);
 			speechTimer = null;
 		}
-		// Cancel any playing Kokoro TTS audio
+		// Cancel any playing local audio
+		if (currentSource) {
+			try {
+				currentSource.stop();
+			} catch {}
+			currentSource.disconnect();
+			currentSource = null;
+		}
 		if (currentAudio) {
 			currentAudio.pause();
 			currentAudio = null;
@@ -171,64 +172,57 @@
 		speechTimer = setTimeout(() => {
 			speechTimer = null;
 			const text = `Mời số, ${numberToVietnamese(called.number)}.`;
-			announceWithKokoroTTS(text).catch((err: unknown) => {
+			announceWithLocalAudio(called.number).catch((err: unknown) => {
 				ttsError = err instanceof Error ? err.message : String(err);
 				announceWithBrowserTTS(text);
 			});
 		}, 100);
 	}
 
-	async function announceWithKokoroTTS(text: string): Promise<void> {
-		const resp = await fetch('/api/tts', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ text })
-		});
+	async function announceWithLocalAudio(number: number): Promise<void> {
+		const filename = `/audio/queue-${String(number).padStart(2, '0')}.wav`;
+		const resp = await fetch(filename);
 		if (!resp.ok) {
-			const body = await resp.text().catch(() => '');
-			throw new Error(`HTTP ${resp.status}: ${body}`);
+			throw new Error(`Không tìm thấy file audio số ${String(number).padStart(2, '0')}`);
 		}
 		const arrayBuf = await resp.arrayBuffer();
 
-		// Strategy 1: Web Audio API (immune to Brave/Chrome autoplay blocks once resumed)
+		// Decode and play the macOS-generated WAV through the unlocked AudioContext.
 		if (audioCtx && audioCtx.state !== 'closed') {
-			if (audioCtx.state === 'suspended') {
-				await audioCtx.resume();
-			}
-			try {
-				const decodedBuffer = await audioCtx.decodeAudioData(arrayBuf.slice(0));
-				const source = audioCtx.createBufferSource();
-				source.buffer = decodedBuffer;
-				source.connect(audioCtx.destination);
-				ttsError = null;
-				ttsMode = 'kokoro';
-				source.start(0);
-				return;
-			} catch (decodeErr) {
-				console.warn('[AudioContext] decode failed, trying HTML5 Audio fallback:', decodeErr);
-			}
+			if (audioCtx.state === 'suspended') await audioCtx.resume();
+			const decodedBuffer = await audioCtx.decodeAudioData(arrayBuf.slice(0));
+			const source = audioCtx.createBufferSource();
+			source.buffer = decodedBuffer;
+			source.connect(audioCtx.destination);
+			currentSource = source;
+			source.onended = () => {
+				source.disconnect();
+				if (currentSource === source) currentSource = null;
+			};
+			ttsError = null;
+			ttsMode = 'macos';
+			source.start(0);
+			return;
 		}
 
-		// Strategy 2: Pre-unlocked HTML5 Audio with explicit audio/wav Blob
+		// Fallback when Web Audio is unavailable.
 		const blob = new Blob([arrayBuf], { type: 'audio/wav' });
 		const url = URL.createObjectURL(blob);
-		const audio = prewarmedAudio || new Audio();
+		const audio = new Audio(url);
 		currentAudio = audio;
-		audio.src = url;
-		audio.volume = 1.0;
+		audio.volume = 1;
 		audio.onended = () => {
 			URL.revokeObjectURL(url);
 			if (currentAudio === audio) currentAudio = null;
 		};
 		ttsError = null;
-		ttsMode = 'kokoro';
+		ttsMode = 'macos';
 		await audio.play();
 	}
-
 	function testAudio(): void {
 		const testNumber = ws.currentNumber > 0 ? ws.currentNumber : 21;
 		const text = `Mời số, ${numberToVietnamese(testNumber)}.`;
-		announceWithKokoroTTS(text).catch((err: unknown) => {
+		announceWithLocalAudio(testNumber).catch((err: unknown) => {
 			ttsError = err instanceof Error ? err.message : String(err);
 			announceWithBrowserTTS(text);
 		});
@@ -320,12 +314,12 @@
 		</span>
 	</div>
 
-	<!-- TTS mode indicator and test button -->
+	<!-- Local macOS audio indicator and test button -->
 	{#if audioEnabled}
 		<div class="mt-3 flex items-center gap-3">
 			{#if ttsMode !== 'unknown'}
-				<p class="text-xs {ttsMode === 'kokoro' ? 'text-green-500' : 'text-yellow-500'}">
-					{ttsMode === 'kokoro' ? '● Kokoro TTS' : '● Browser TTS (fallback)'}
+				<p class="text-xs {ttsMode === 'macos' ? 'text-green-500' : 'text-yellow-500'}">
+					{ttsMode === 'macos' ? '● Audio macOS' : '● Browser TTS (fallback)'}
 				</p>
 			{/if}
 			<button
@@ -333,20 +327,20 @@
 				class="rounded border border-gray-800 bg-gray-900/80 px-2.5 py-1 text-[11px] font-medium text-gray-400
 					   transition-colors hover:border-gray-700 hover:text-gray-200"
 			>
-				🔊 Thử âm thanh
+				Thử file audio
 			</button>
 		</div>
 	{/if}
 
-	<!-- Kokoro TTS error (debug) -->
+	<!-- Local audio error (debug) -->
 	{#if ttsError}
 		<p class="mt-2 max-w-xs text-center text-xs break-all text-red-400">
-			Kokoro TTS error: {ttsError}
+			Lỗi file audio: {ttsError}
 		</p>
 	{/if}
 
 	<!-- Voice selector — shown in browser fallback mode -->
-	{#if audioEnabled && ttsMode !== 'kokoro' && allVoices.length > 0}
+	{#if audioEnabled && ttsMode !== 'macos' && allVoices.length > 0}
 		<div class="mt-4 flex flex-col items-center gap-2">
 			<p class="text-xs font-medium tracking-widest text-gray-600 uppercase">Giọng đọc</p>
 			<div class="flex items-center gap-2">

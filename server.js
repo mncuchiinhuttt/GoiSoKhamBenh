@@ -2,10 +2,7 @@
 // Run AFTER building: npm run build && node server.js
 // ESM syntax required because package.json has "type": "module".
 
-import { existsSync } from 'node:fs';
-if (existsSync('.env') && typeof process.loadEnvFile === 'function') {
-	process.loadEnvFile('.env');
-}
+import 'dotenv/config';
 process.on('uncaughtException', (err) => {
 	// Prevent server crash if an outdated client requests an old deleted build chunk
 	if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
@@ -16,7 +13,6 @@ process.on('uncaughtException', (err) => {
 	process.exit(1);
 });
 
-
 import { createServer } from 'http';
 import { networkInterfaces } from 'os';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -25,6 +21,8 @@ import { initLED, sendToLED, sendIdleToLED } from './src/lib/server/led-controll
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0'; // 0.0.0.0 makes it reachable over LAN
+const MACOS_TTS_VOICE = process.env.MACOS_TTS_VOICE ?? 'Linh';
+console.log(`🔊 TTS: file audio macOS (${MACOS_TTS_VOICE}) | 50 số trong static/audio`);
 
 // ─── Authoritative in-memory state ───────────────────────────────────────────
 const state = {
@@ -157,11 +155,11 @@ wss.on('connection', (ws) => {
 			case 'CALL': {
 				const { queueId, room, number } = msg;
 
-				if (!Number.isInteger(number) || number < 1 || number > 99) {
+				if (!Number.isInteger(number) || number < 1 || number > 50) {
 					ws.send(
 						JSON.stringify({
 							type: 'ERROR',
-							message: `Number must be an integer between 1 and 99, got: ${number}`
+							message: `Number must be an integer between 1 and 50, got: ${number}`
 						})
 					);
 					return;
@@ -236,7 +234,7 @@ wss.on('connection', (ws) => {
 
 			case 'SKIP': {
 				const { queueId, room, number } = msg;
-				if (!Number.isInteger(number) || number < 1 || number > 99) break;
+				if (!Number.isInteger(number) || number < 1 || number > 50) break;
 				const roomState = state.queues[queueId]?.rooms[room];
 				if (!roomState) break;
 				roomState.calledNumbers.add(number);

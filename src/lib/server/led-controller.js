@@ -64,8 +64,12 @@ function frameEE(addr, order4) {
 async function writeAndDrain(buf) {
 	const p = port;
 	if (!p?.isOpen) return;
-	await new Promise((resolve, reject) => p.write(buf, (err) => (err ? reject(err) : resolve(undefined))));
-	await new Promise((resolve, reject) => p.drain((err) => (err ? reject(err) : resolve(undefined))));
+	await new Promise((resolve, reject) =>
+		p.write(buf, (err) => (err ? reject(err) : resolve(undefined)))
+	);
+	await new Promise((resolve, reject) =>
+		p.drain((err) => (err ? reject(err) : resolve(undefined)))
+	);
 }
 
 /** Background polling loop — mirrors scan-led.mjs startPolling(). */
@@ -176,7 +180,7 @@ export function initLED() {
  * Send number to LED display — FF → sleep 1s → DD → EE (mirrors scan-led.mjs callNumber).
  *
  * @param {{ number: number, counter?: number, address?: number }} opts
- *   number:  1–99  — patient queue number (padded to 4 digits)
+ *   number:  1–50  — patient queue number (padded to 4 digits)
  *   counter: 1–99  — counter/desk number, default 1 (padded to 2 digits)
  *   address: 0–15  — display address, default 0
  */
