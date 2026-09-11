@@ -120,10 +120,6 @@
 		} catch {}
 
 		audioEnabled = true;
-		announceWithLocalFile('/audio/ready.wav').catch((err: unknown) => {
-			ttsError = err instanceof Error ? err.message : String(err);
-			announceWithBrowserTTS('Đã sẵn sàng.');
-		});
 	}
 
 	// Convert 1–99 to Vietnamese words so TTS reads naturally and slowly.
