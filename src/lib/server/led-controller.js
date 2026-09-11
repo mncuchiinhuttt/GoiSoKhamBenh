@@ -180,7 +180,7 @@ export function initLED() {
  * Send number to LED display — FF → sleep 1s → DD → EE (mirrors scan-led.mjs callNumber).
  *
  * @param {{ number: number, counter?: number, address?: number }} opts
- *   number:  1–50  — patient queue number (padded to 4 digits)
+ *   number:  1–99  — patient queue number (padded to 4 digits)
  *   counter: 1–99  — counter/desk number, default 1 (padded to 2 digits)
  *   address: 0–15  — display address, default 0
  */

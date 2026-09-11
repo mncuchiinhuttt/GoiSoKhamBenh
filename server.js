@@ -22,7 +22,7 @@ import { initLED, sendToLED, sendIdleToLED } from './src/lib/server/led-controll
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = process.env.HOST ?? '0.0.0.0'; // 0.0.0.0 makes it reachable over LAN
 const MACOS_TTS_VOICE = process.env.MACOS_TTS_VOICE ?? 'Linh';
-console.log(`🔊 TTS: file audio macOS (${MACOS_TTS_VOICE}) | 50 số trong static/audio`);
+console.log(`🔊 TTS: file audio macOS (${MACOS_TTS_VOICE}) | 99 số trong static/audio`);
 
 // ─── Authoritative in-memory state ───────────────────────────────────────────
 const state = {
@@ -155,11 +155,11 @@ wss.on('connection', (ws) => {
 			case 'CALL': {
 				const { queueId, room, number } = msg;
 
-				if (!Number.isInteger(number) || number < 1 || number > 50) {
+				if (!Number.isInteger(number) || number < 1 || number > 99) {
 					ws.send(
 						JSON.stringify({
 							type: 'ERROR',
-							message: `Number must be an integer between 1 and 50, got: ${number}`
+							message: `Number must be an integer between 1 and 99, got: ${number}`
 						})
 					);
 					return;
@@ -234,7 +234,7 @@ wss.on('connection', (ws) => {
 
 			case 'SKIP': {
 				const { queueId, room, number } = msg;
-				if (!Number.isInteger(number) || number < 1 || number > 50) break;
+				if (!Number.isInteger(number) || number < 1 || number > 99) break;
 				const roomState = state.queues[queueId]?.rooms[room];
 				if (!roomState) break;
 				roomState.calledNumbers.add(number);

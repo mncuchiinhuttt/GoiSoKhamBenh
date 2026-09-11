@@ -120,10 +120,13 @@
 		} catch {}
 
 		audioEnabled = true;
-		announceWithBrowserTTS('Loa đã sẵn sàng');
+		announceWithLocalFile('/audio/ready.wav').catch((err: unknown) => {
+			ttsError = err instanceof Error ? err.message : String(err);
+			announceWithBrowserTTS('Đã sẵn sàng.');
+		});
 	}
 
-	// Convert 1–50 to Vietnamese words so TTS reads naturally and slowly.
+	// Convert 1–99 to Vietnamese words so TTS reads naturally and slowly.
 	// Reading "hai mươi mốt" is inherently slower + clearer than reading "21".
 	function numberToVietnamese(n: number): string {
 		const units = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
@@ -172,18 +175,19 @@
 		speechTimer = setTimeout(() => {
 			speechTimer = null;
 			const text = `Mời số, ${numberToVietnamese(called.number)}.`;
-			announceWithLocalAudio(called.number).catch((err: unknown) => {
-				ttsError = err instanceof Error ? err.message : String(err);
-				announceWithBrowserTTS(text);
-			});
+			announceWithLocalFile(`/audio/queue-${String(called.number).padStart(2, '0')}.wav`).catch(
+				(err: unknown) => {
+					ttsError = err instanceof Error ? err.message : String(err);
+					announceWithBrowserTTS(text);
+				}
+			);
 		}, 100);
 	}
 
-	async function announceWithLocalAudio(number: number): Promise<void> {
-		const filename = `/audio/queue-${String(number).padStart(2, '0')}.wav`;
+	async function announceWithLocalFile(filename: string): Promise<void> {
 		const resp = await fetch(filename);
 		if (!resp.ok) {
-			throw new Error(`Không tìm thấy file audio số ${String(number).padStart(2, '0')}`);
+			throw new Error(`Không tìm thấy file audio ${filename}`);
 		}
 		const arrayBuf = await resp.arrayBuffer();
 
@@ -220,9 +224,8 @@
 		await audio.play();
 	}
 	function testAudio(): void {
-		const testNumber = ws.currentNumber > 0 ? ws.currentNumber : 21;
-		const text = `Mời số, ${numberToVietnamese(testNumber)}.`;
-		announceWithLocalAudio(testNumber).catch((err: unknown) => {
+		const text = 'Đã sẵn sàng.';
+		announceWithLocalFile('/audio/ready.wav').catch((err: unknown) => {
 			ttsError = err instanceof Error ? err.message : String(err);
 			announceWithBrowserTTS(text);
 		});
@@ -327,7 +330,7 @@
 				class="rounded border border-gray-800 bg-gray-900/80 px-2.5 py-1 text-[11px] font-medium text-gray-400
 					   transition-colors hover:border-gray-700 hover:text-gray-200"
 			>
-				Thử file audio
+				Thử âm thanh
 			</button>
 		</div>
 	{/if}

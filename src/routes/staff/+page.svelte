@@ -17,9 +17,9 @@
 	let confirmReset = $state(false);
 
 	// ─── Derived ──────────────────────────────────────────────────────────────
-	// Find the smallest number (1–50) that has not been called yet.
+	// Find the smallest number (1–99) that has not been called yet.
 	const nextNumber = $derived.by(() => {
-		for (let n = 1; n <= 50; n++) {
+		for (let n = 1; n <= 99; n++) {
 			if (!ws.calledNumbers.has(n)) return n;
 		}
 		return null;
@@ -43,8 +43,8 @@
 	function callManual(): void {
 		manualError = '';
 		const n = parseInt(manualInput.trim(), 10);
-		if (isNaN(n) || n < 1 || n > 50) {
-			manualError = 'Nhập số từ 1 đến 50';
+		if (isNaN(n) || n < 1 || n > 99) {
+			manualError = 'Nhập số từ 1 đến 99';
 			return;
 		}
 		if (ws.calledNumbers.has(n)) {
@@ -167,7 +167,7 @@
 				   disabled:cursor-not-allowed disabled:opacity-40"
 		>
 			{#if nextNumber === null}
-				Đã gọi tới số tối đa (50)
+				Đã gọi tới số tối đa (99)
 			{:else}
 				Gọi số tiếp theo: {String(nextNumber).padStart(2, '0')}
 			{/if}
@@ -194,7 +194,7 @@
 					type="text"
 					inputmode="numeric"
 					pattern="[0-9]*"
-					placeholder="1 – 50"
+					placeholder="1 – 99"
 					bind:value={manualInput}
 					onkeydown={handleManualKeydown}
 					disabled={ws.status !== 'connected'}
