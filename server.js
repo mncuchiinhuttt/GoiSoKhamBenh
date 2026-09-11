@@ -2,10 +2,25 @@
 // Run AFTER building: npm run build && node server.js
 // ESM syntax required because package.json has "type": "module".
 
+import { existsSync } from 'node:fs';
+if (existsSync('.env') && typeof process.loadEnvFile === 'function') {
+	process.loadEnvFile('.env');
+}
+process.on('uncaughtException', (err) => {
+	// Prevent server crash if an outdated client requests an old deleted build chunk
+	if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+		console.warn('⚠️ File not found (likely outdated client browser cache):', err.message);
+		return;
+	}
+	console.error('❌ Uncaught exception:', err);
+	process.exit(1);
+});
+
+
 import { createServer } from 'http';
 import { networkInterfaces } from 'os';
 import { WebSocketServer, WebSocket } from 'ws';
-import { handler } from './build/handler.js';
+const { handler } = await import('./build/handler.js');
 import { initLED, sendToLED, sendIdleToLED } from './src/lib/server/led-controller.js';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
@@ -41,7 +56,8 @@ const server = createServer(handler);
 const wss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
-	if (req.url === '/ws') {
+	const pathname = req.url ? new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '') : '';
+	if (pathname === '/ws') {
 		wss.handleUpgrade(req, socket, head, (ws) => {
 			wss.emit('connection', ws, req);
 		});
@@ -59,7 +75,11 @@ function broadcast(message) {
 	const data = JSON.stringify(message);
 	for (const [client] of clients) {
 		if (client.readyState === WebSocket.OPEN) {
-			client.send(data);
+			try {
+				client.send(data);
+			} catch (err) {
+				console.error('[WS] Broadcast error:', err);
+			}
 		}
 	}
 }
@@ -70,7 +90,11 @@ function broadcastDisplaysChanged() {
 	const data = JSON.stringify({ type: 'DISPLAYS_CHANGED', displays });
 	for (const [client, meta] of clients) {
 		if (meta.role === 'staff' && client.readyState === WebSocket.OPEN) {
-			client.send(data);
+			try {
+				client.send(data);
+			} catch (err) {
+				console.error('[WS] Display list broadcast error:', err);
+			}
 		}
 	}
 }
@@ -179,9 +203,7 @@ wss.on('connection', (ws) => {
 			case 'RECALL_LAST': {
 				const roomState = state.queues['general']?.rooms['P1'];
 				if (!roomState || roomState.current === 0) {
-					ws.send(
-						JSON.stringify({ type: 'ERROR', message: 'No number has been called yet' })
-					);
+					ws.send(JSON.stringify({ type: 'ERROR', message: 'No number has been called yet' }));
 					return;
 				}
 
@@ -234,9 +256,7 @@ wss.on('connection', (ws) => {
 			}
 
 			default:
-				ws.send(
-					JSON.stringify({ type: 'ERROR', message: `Unknown message type: ${msg.type}` })
-				);
+				ws.send(JSON.stringify({ type: 'ERROR', message: `Unknown message type: ${msg.type}` }));
 		}
 	});
 

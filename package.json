@@ -15,6 +15,7 @@
 		"format": "prettier --write ."
 	},
 	"dependencies": {
+		"@gradio/client": "^2.5.1",
 		"serialport": "^13.0.0",
 		"ws": "^8.18.0"
 	},

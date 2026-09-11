@@ -37,11 +37,10 @@ export class WsClient {
 	}
 
 	connect(): void {
-		if (this.#destroyed) return;
+		this.#destroyed = false;
 		if (
 			this.#ws &&
-			(this.#ws.readyState === WebSocket.CONNECTING ||
-				this.#ws.readyState === WebSocket.OPEN)
+			(this.#ws.readyState === WebSocket.CONNECTING || this.#ws.readyState === WebSocket.OPEN)
 		) {
 			return;
 		}
@@ -65,6 +64,7 @@ export class WsClient {
 		this.#ws.onopen = () => {
 			this.status = 'connected';
 			this.#reconnectAttempts = 0;
+			console.log(`[WsClient:${this.#role}] Connected to ${url}`);
 			// Declare role → server replies with STATE_SYNC
 			this.#send({ type: 'HELLO', role: this.#role, queueId: 'general', room: 'P1' });
 		};
@@ -77,15 +77,18 @@ export class WsClient {
 				console.error('[WsClient] Failed to parse message:', event.data);
 				return;
 			}
+			const num = 'number' in msg && typeof msg.number === 'number' ? msg.number : '';
+			console.log(`[WsClient:${this.#role}] Received:`, msg.type, num);
 			this.#handleIncoming(msg);
 		};
 
-		this.#ws.onerror = () => {
-			// onerror always fires before onclose — just mark status
+		this.#ws.onerror = (err) => {
+			console.warn(`[WsClient:${this.#role}] Error event:`, err);
 			this.status = 'error';
 		};
 
-		this.#ws.onclose = () => {
+		this.#ws.onclose = (ev) => {
+			console.log(`[WsClient:${this.#role}] Closed (code=${ev.code}, reason=${ev.reason})`);
 			this.status = 'disconnected';
 			this.#ws = null;
 			if (!this.#destroyed) {

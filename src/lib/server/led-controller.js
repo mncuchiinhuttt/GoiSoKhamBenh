@@ -22,39 +22,50 @@ const IDLE_TEXT = 'XIN CHAO   ';
 const pollDD01 = Buffer.from([0x02, 0xdd, 0x01, 0x45, 0x03, 0x03]);
 const pollDD0F = Buffer.from([0x02, 0xdd, 0x0f, 0x45, 0x03, 0x03]);
 const pollCC00 = Buffer.from([0x02, 0xcc, 0x00, 0x45, 0x03, 0x03]);
-
+/** @param {number} ms */
 function sleep(ms) {
 	return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * @param {number} n
+ * @param {number} len
+ */
 function asciiDigits(n, len) {
 	return Buffer.from(String(n).padStart(len, '0'), 'ascii');
 }
 
-/** Build main display frame: 02 FF [addr] [4 digits order] [2 digits sign] 03 */
+/**
+ * @param {number} addr
+ * @param {Buffer} order4
+ * @param {Buffer} sign2
+ */
 function frameFF(addr, order4, sign2) {
 	return Buffer.from([0x02, 0xff, addr & 0xff, ...order4, ...sign2, 0x03]);
 }
 
-/** Build counter DD frame: 02 DD [addr] [4 digits order] 03 */
+/**
+ * @param {number} addr
+ * @param {Buffer} order4
+ */
 function frameDD(addr, order4) {
 	return Buffer.from([0x02, 0xdd, addr & 0xff, ...order4, 0x03]);
 }
 
-/** Build counter EE frame: 02 EE [addr] [4 digits order] 03 */
+/**
+ * @param {number} addr
+ * @param {Buffer} order4
+ */
 function frameEE(addr, order4) {
 	return Buffer.from([0x02, 0xee, addr & 0xff, ...order4, 0x03]);
 }
 
-/** Write full buffer then wait for drain. */
+/** @param {Buffer} buf */
 async function writeAndDrain(buf) {
-	if (!port?.isOpen) return;
-	await new Promise((resolve, reject) =>
-		port.write(buf, (err) => (err ? reject(err) : resolve()))
-	);
-	await new Promise((resolve, reject) =>
-		port.drain((err) => (err ? reject(err) : resolve()))
-	);
+	const p = port;
+	if (!p?.isOpen) return;
+	await new Promise((resolve, reject) => p.write(buf, (err) => (err ? reject(err) : resolve(undefined))));
+	await new Promise((resolve, reject) => p.drain((err) => (err ? reject(err) : resolve(undefined))));
 }
 
 /** Background polling loop — mirrors scan-led.mjs startPolling(). */
@@ -128,12 +139,14 @@ export function initLED() {
 			return;
 		}
 
-		// Set RTS=true, DTR=false once — never change afterwards (mirrors Java + scan-led.mjs)
-		port.set({ rts: true, dtr: false }, (setErr) => {
-			if (setErr) {
-				console.error(`❌ LED: Không set RTS: ${setErr.message}`);
-			}
-		});
+		const p = port;
+		if (p) {
+			p.set({ rts: true, dtr: false }, (setErr) => {
+				if (setErr) {
+					console.error(`❌ LED: Không set RTS: ${setErr.message}`);
+				}
+			});
+		}
 
 		// Small delay after RTS then start polling (mirrors scan-led.mjs open())
 		setTimeout(() => {
@@ -193,7 +206,7 @@ export async function sendToLED({ number, counter = 1, address = 0 }) {
 		console.log(
 			`📺 LED: Hiển thị số ${String(number).padStart(4, '0')} quầy ${String(counter).padStart(2, '0')} → addr ${address}`
 		);
-	} catch (err) {
-		console.error('❌ LED sendToLED error:', err.message);
+	} catch (/** @type {any} */ err) {
+		console.error('❌ LED sendToLED error:', err?.message || err);
 	}
 }

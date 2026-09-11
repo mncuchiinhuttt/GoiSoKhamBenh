@@ -16,11 +16,11 @@
 	// while a number is already on screen.
 	let lastAnnouncedTs: number | null = null;
 
-	// Google TTS mode indicator
-	let ttsMode = $state<'google' | 'browser' | 'unknown'>('unknown');
-	// Last Google TTS error (for debugging)
+	// Kokoro TTS mode indicator
+	let ttsMode = $state<'kokoro' | 'browser' | 'unknown'>('unknown');
+	// Last Kokoro TTS error (for debugging)
 	let ttsError = $state<string | null>(null);
-	// Active Google TTS audio element — cancelled when a new number is called
+	// Active Kokoro TTS audio element — cancelled when a new number is called
 	let currentAudio: HTMLAudioElement | null = null;
 
 	// All voices available on this device/browser
@@ -30,9 +30,7 @@
 		browser ? (localStorage.getItem('display-voice-uri') ?? '') : ''
 	);
 	// Resolved voice object from the current selection
-	const activeVoice = $derived(
-		allVoices.find((v) => v.voiceURI === selectedVoiceURI) ?? null
-	);
+	const activeVoice = $derived(allVoices.find((v) => v.voiceURI === selectedVoiceURI) ?? null);
 	// True when voices are loaded AND a valid voice is selected
 	const voiceReady = $derived(allVoices.length > 0 && activeVoice !== null);
 
@@ -81,20 +79,51 @@
 		}
 	});
 
+	let audioCtx: AudioContext | null = null;
+	let prewarmedAudio: HTMLAudioElement | null = null;
+
 	function enableAudio(): void {
-		// Must run from a user-gesture to unlock browser autoplay policy.
-		const warmup = new SpeechSynthesisUtterance(' ');
-		warmup.volume = 0;
-		speechSynthesis.speak(warmup);
+		// 1. Unlock Web Audio API AudioContext during user click gesture
+		try {
+			const AudioContextClass =
+				window.AudioContext ||
+				(window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+			if (AudioContextClass) {
+				audioCtx = new AudioContextClass();
+				if (audioCtx.state === 'suspended') {
+					audioCtx.resume();
+				}
+			}
+		} catch (e) {
+			console.warn('[Audio] Failed to init AudioContext:', e);
+		}
+
+		// 2. Pre-unlock HTML5 Audio during user click gesture
+		try {
+			prewarmedAudio = new Audio();
+			prewarmedAudio.src =
+				'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+			prewarmedAudio.play().then(() => prewarmedAudio?.pause()).catch(() => {});
+		} catch (e) {
+			console.warn('[Audio] Failed to pre-warm HTML5 Audio:', e);
+		}
+
+		// 3. Unlock browser Web Speech API
+		try {
+			const warmup = new SpeechSynthesisUtterance(' ');
+			warmup.volume = 0;
+			speechSynthesis.speak(warmup);
+		} catch {}
+
 		audioEnabled = true;
 	}
 
-	// Connect to Google TTS immediately when "Bật loa" is clicked.
+	// Connect to Kokoro TTS immediately when "Bật loa" is clicked.
 	// This pre-warms the connection, populates the cache, and confirms the speaker works
 	// before the first number is called — so there's no delay on first announcement.
 	$effect(() => {
 		if (!audioEnabled) return;
-		announceWithGoogleTTS('Loa đã sẵn sàng').catch((err: unknown) => {
+		announceWithKokoroTTS('Loa đã sẵn sàng').catch((err: unknown) => {
 			ttsError = err instanceof Error ? err.message : String(err);
 			announceWithBrowserTTS('Loa đã sẵn sàng');
 		});
@@ -131,7 +160,7 @@
 			clearTimeout(speechTimer);
 			speechTimer = null;
 		}
-		// Cancel any playing Google TTS audio
+		// Cancel any playing Kokoro TTS audio
 		if (currentAudio) {
 			currentAudio.pause();
 			currentAudio = null;
@@ -142,14 +171,14 @@
 		speechTimer = setTimeout(() => {
 			speechTimer = null;
 			const text = `Mời số, ${numberToVietnamese(called.number)}.`;
-			announceWithGoogleTTS(text).catch((err: unknown) => {
+			announceWithKokoroTTS(text).catch((err: unknown) => {
 				ttsError = err instanceof Error ? err.message : String(err);
 				announceWithBrowserTTS(text);
 			});
 		}, 100);
 	}
 
-	async function announceWithGoogleTTS(text: string): Promise<void> {
+	async function announceWithKokoroTTS(text: string): Promise<void> {
 		const resp = await fetch('/api/tts', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -159,17 +188,50 @@
 			const body = await resp.text().catch(() => '');
 			throw new Error(`HTTP ${resp.status}: ${body}`);
 		}
-		const blob = await resp.blob();
+		const arrayBuf = await resp.arrayBuffer();
+
+		// Strategy 1: Web Audio API (immune to Brave/Chrome autoplay blocks once resumed)
+		if (audioCtx && audioCtx.state !== 'closed') {
+			if (audioCtx.state === 'suspended') {
+				await audioCtx.resume();
+			}
+			try {
+				const decodedBuffer = await audioCtx.decodeAudioData(arrayBuf.slice(0));
+				const source = audioCtx.createBufferSource();
+				source.buffer = decodedBuffer;
+				source.connect(audioCtx.destination);
+				ttsError = null;
+				ttsMode = 'kokoro';
+				source.start(0);
+				return;
+			} catch (decodeErr) {
+				console.warn('[AudioContext] decode failed, trying HTML5 Audio fallback:', decodeErr);
+			}
+		}
+
+		// Strategy 2: Pre-unlocked HTML5 Audio with explicit audio/wav Blob
+		const blob = new Blob([arrayBuf], { type: 'audio/wav' });
 		const url = URL.createObjectURL(blob);
-		const audio = new Audio(url);
+		const audio = prewarmedAudio || new Audio();
 		currentAudio = audio;
+		audio.src = url;
+		audio.volume = 1.0;
 		audio.onended = () => {
 			URL.revokeObjectURL(url);
 			if (currentAudio === audio) currentAudio = null;
 		};
 		ttsError = null;
-		ttsMode = 'google';
+		ttsMode = 'kokoro';
 		await audio.play();
+	}
+
+	function testAudio(): void {
+		const testNumber = ws.currentNumber > 0 ? ws.currentNumber : 21;
+		const text = `Mời số, ${numberToVietnamese(testNumber)}.`;
+		announceWithKokoroTTS(text).catch((err: unknown) => {
+			ttsError = err instanceof Error ? err.message : String(err);
+			announceWithBrowserTTS(text);
+		});
 	}
 
 	function announceWithBrowserTTS(text: string): void {
@@ -226,10 +288,10 @@
 {/if}
 
 <!-- Main display -->
-<div class="flex h-screen select-none flex-col items-center justify-center bg-gray-950">
+<div class="flex h-screen flex-col items-center justify-center bg-gray-950 select-none">
 	<!-- Big number -->
 	{#key ws.lastCalled?.ts}
-		<div class="animate-number-flash text-[14rem] font-black leading-none tabular-nums text-white">
+		<div class="animate-number-flash text-[14rem] leading-none font-black text-white tabular-nums">
 			{displayNumber()}
 		</div>
 	{/key}
@@ -250,26 +312,41 @@
 			class:bg-red-500={ws.status !== 'connected' && ws.status !== 'connecting'}
 		></span>
 		<span class="text-xs text-gray-600">
-			{ws.status === 'connected' ? 'Đang kết nối' : 'Đang kết nối lại…'}
+			{ws.status === 'connected'
+				? 'Đã kết nối'
+				: ws.status === 'connecting'
+					? 'Đang kết nối…'
+					: 'Đang kết nối lại…'}
 		</span>
 	</div>
 
-	<!-- TTS mode indicator (shown after first announcement) -->
-	{#if audioEnabled && ttsMode !== 'unknown'}
-		<p class="mt-3 text-xs {ttsMode === 'google' ? 'text-green-600' : 'text-yellow-500'}">
-			{ttsMode === 'google' ? '● Google Cloud TTS' : '● Browser TTS (fallback)'}
-		</p>
+	<!-- TTS mode indicator and test button -->
+	{#if audioEnabled}
+		<div class="mt-3 flex items-center gap-3">
+			{#if ttsMode !== 'unknown'}
+				<p class="text-xs {ttsMode === 'kokoro' ? 'text-green-500' : 'text-yellow-500'}">
+					{ttsMode === 'kokoro' ? '● Kokoro TTS' : '● Browser TTS (fallback)'}
+				</p>
+			{/if}
+			<button
+				onclick={testAudio}
+				class="rounded border border-gray-800 bg-gray-900/80 px-2.5 py-1 text-[11px] font-medium text-gray-400
+					   transition-colors hover:border-gray-700 hover:text-gray-200"
+			>
+				🔊 Thử âm thanh
+			</button>
+		</div>
 	{/if}
 
-	<!-- Google TTS error (debug) -->
+	<!-- Kokoro TTS error (debug) -->
 	{#if ttsError}
-		<p class="mt-2 max-w-xs break-all text-center text-xs text-red-400">
-			Google TTS error: {ttsError}
+		<p class="mt-2 max-w-xs text-center text-xs break-all text-red-400">
+			Kokoro TTS error: {ttsError}
 		</p>
 	{/if}
 
 	<!-- Voice selector — shown in browser fallback mode -->
-	{#if audioEnabled && ttsMode !== 'google' && allVoices.length > 0}
+	{#if audioEnabled && ttsMode !== 'kokoro' && allVoices.length > 0}
 		<div class="mt-4 flex flex-col items-center gap-2">
 			<p class="text-xs font-medium tracking-widest text-gray-600 uppercase">Giọng đọc</p>
 			<div class="flex items-center gap-2">

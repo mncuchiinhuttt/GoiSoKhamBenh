@@ -116,7 +116,7 @@
 				class="flex flex-col items-center justify-center rounded-lg border border-gray-200 bg-white p-6"
 			>
 				<p class="mb-1 text-xs font-medium tracking-widest text-gray-400 uppercase">Số hiện tại</p>
-				<p class="text-[5rem] font-black leading-none tabular-nums text-gray-900">
+				<p class="text-[5rem] leading-none font-black text-gray-900 tabular-nums">
 					{ws.currentNumber === 0 ? '--' : String(ws.currentNumber).padStart(2, '0')}
 				</p>
 				{#if ws.currentNumber > 0}
@@ -199,7 +199,7 @@
 					onkeydown={handleManualKeydown}
 					disabled={ws.status !== 'connected'}
 					class="w-32 rounded-md border border-gray-200 px-4 py-2.5 text-center text-xl
-						   font-bold tabular-nums text-gray-900 outline-none
+						   font-bold text-gray-900 tabular-nums outline-none
 						   focus:border-gray-400 focus:ring-1 focus:ring-gray-400
 						   disabled:cursor-not-allowed disabled:opacity-50"
 				/>
@@ -224,7 +224,7 @@
 				<p class="text-xs font-medium tracking-widest text-gray-400 uppercase">
 					Lịch sử gọi
 					{#if ws.history.length > 0}
-						<span class="ml-1 font-normal normal-case text-gray-300">({ws.history.length})</span>
+						<span class="ml-1 font-normal text-gray-300 normal-case">({ws.history.length})</span>
 					{/if}
 				</p>
 
@@ -266,10 +266,7 @@
 			{:else}
 				<ul class="divide-y divide-gray-50">
 					{#each ws.history as item, i (item.ts)}
-						<li
-							class="flex items-center gap-3 px-4 py-3"
-							class:opacity-50={item.skipped}
-						>
+						<li class="flex items-center gap-3 px-4 py-3" class:opacity-50={item.skipped}>
 							<!-- Index -->
 							<span class="w-5 text-right text-xs text-gray-300">{i + 1}</span>
 
